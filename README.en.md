@@ -29,7 +29,7 @@ Chinese documentation: [README.md](README.md)
 - CMake 3.20+, ECM 6.22+, Qt 6.10+ and KF6 6.22+.
 - KWin development files matching the running KWin version.
 
-KWin native effect plugins are ABI-bound to `EffectPluginFactory`. Rebuild with matching development packages after a KWin upgrade.
+KWin native effect plugins are ABI-bound to `EffectPluginFactory`, and the factory IID includes the patch version. Rebuild with matching development packages after any KWin upgrade, including patch releases such as 6.8.1 → 6.8.2. `install-local.sh` detects the version change and removes the stale build directory automatically.
 
 ## Install
 

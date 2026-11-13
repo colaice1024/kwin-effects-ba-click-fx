@@ -32,7 +32,7 @@ English documentation: [README.en.md](README.en.md)
 - KF6 6.22+
 - 与当前运行版本匹配的 KWin 开发包
 
-KWin 原生特效插件与 `EffectPluginFactory` ABI 绑定。本项目兼容 KWin 6.6 及更高版本；升级 KWin 后必须用对应版本开发包重新编译，否则 KWin 会忽略旧二进制。
+KWin 原生特效插件与 `EffectPluginFactory` ABI 绑定，工厂 IID 连补丁版本也包含在内。本项目兼容 KWin 6.6 及更高版本；升级 KWin（包括 6.8.1 → 6.8.2 这类补丁升级）后必须用对应版本开发包重新编译，否则 KWin 会忽略旧二进制。`install-local.sh` 会检测版本变化并自动清理旧构建目录。
 
 ## 安装
 
