@@ -2,10 +2,11 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-project(kwin-effects-ba-click-fx VERSION 1.0.5 LANGUAGES CXX)
+project(kwin-effects-ba-click-fx VERSION 1.0.6 LANGUAGES CXX)
 
 # 普通源码构建默认不编译测试；CI 和开发者可用 -DBUILD_TESTING=ON 显式启用。
 option(BUILD_TESTING "Build the test suite" OFF)
+option(BA_CLICK_FX_BUILD_GPU_TESTS "Build the optional offscreen GPU regression suite" OFF)
 
 # 根据源文件内容生成可复现的构建标识。install-local.sh 可通过 /Effects.debug
 # 查询该值，以判断 KWin 当前加载的插件是否与本次构建一致。相同源码始终生成相同
@@ -20,7 +21,10 @@ file(GLOB_RECURSE BA_CLICK_FX_BUILD_ID_FILES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/config/*.cpp"
     "${CMAKE_SOURCE_DIR}/config/*.h"
     "${CMAKE_SOURCE_DIR}/config/*.ui"
+    "${CMAKE_SOURCE_DIR}/src/metadata.json"
+    "${CMAKE_SOURCE_DIR}/po/*.po"
 )
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${BA_CLICK_FX_BUILD_ID_FILES})
 set(BA_CLICK_FX_BUILD_ID_MATERIAL "")
 foreach(path IN LISTS BA_CLICK_FX_BUILD_ID_FILES)
     file(SHA256 "${path}" file_hash)
@@ -48,7 +52,7 @@ find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui DBus Quick Widgets)
 # KCMUtils 为配置模块提供 KCModule 基类和 ki18n_wrap_ui。
 find_package(KF6 6.22 REQUIRED COMPONENTS Config CoreAddons I18n KCMUtils Service WindowSystem)
 
-find_package(KWin REQUIRED)
+find_package(KWin 6.6 REQUIRED)
 
 # EffectPluginFactory 的接口标识包含 KWin 版本，升级 KWin 后必须重新编译插件。
 # 配置阶段输出目标版本，供文档与安装脚本核对。

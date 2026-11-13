@@ -1,176 +1,125 @@
-# kwin-effects-ba-click-fx
+# BA Click FX
 
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
+[English](README.en.md) · [文档索引](docs/README.md)
 
-English documentation: [README.en.md](README.en.md)
+为 KDE Plasma / KWin 移植《蔚蓝档案》的 `FX_Touch`。点击时出现中心圆盘、溶解圆环和小三角，按住拖动时生成光带和沿途粒子。
 
-**从 Blue Archive Unity UI/FX_Touch 逐参数移植的 KDE Plasma KWin 点击特效与光标拖尾插件。**
+[特性](#特性) · [运行要求](#运行要求) · [安装与启用](#安装与启用) · [配置](#配置)
 
-`kwin-effects-ba-click-fx` 将 `FX_Touch` 中 ParticleSystem、TrailRenderer 与后处理参数逐项还原到 KWin：点击时播放中心圆盘、溶解圆环和 Ring3 粒子，按住左键拖动时生成 Ribbon 拖尾与 Ring4 距离发射粒子。渲染由原生 C++ / OpenGL 完成，使用线性 RGBA16F Scene 和 Unity PPv2 MXFinalBloom，不依赖脚本运行时。
-
-![BA Click FX 预览](preview/logo.gif)
+![BA Click FX 点击与拖尾预览](preview/logo.gif)
 
 ## 特性
 
-- 从 Unity 参数逐项移植，不是相似风格的重新设计
-- 还原 Ring、MeshTri、Ring3、Ring4 与 TrailRenderer 的颜色、大小、旋转、寿命、UV 动画和 HDR 强度
-- 使用 Cylinder002 原始网格与逐角 UV，粒子贴图由 Shader 直接采样
-- 线性 RGBA16F Scene、HDR 粒子混合与 Unity PPv2 MXFinalBloom
-- 稀疏 damage Region，仅导入、计算和合成本帧可能变化的区域
-- 支持多显示器、HiDPI 和不同输出缩放比例
-- 使用 KWin 指针事件保留高回报率鼠标的真实拖动轨迹
-- 提供 KCM 配置页、重绘区域标记和 CPU/GPU 分段性能日志
-- 设置页参数支持实时预览，点击应用后保存
+- **还原原版粒子与光带。** 采用原版粒子贴图、`Cylinder002` 网格和 UV，移植 Ring、MeshTri、Ring3、Ring4 和 TrailRenderer 的颜色、发光强度、大小、旋转、寿命与 UV 动画。 [FX_Touch 核对记录](docs/unity-parity.md)
+- **原生 GPU 渲染。** 通过 C++ 和 OpenGL 在 RGBA16F 线性场景中混合粒子，复刻 Unity PPv2 的 `MXFinalBloom`，并按 KWin 输出的色彩描述合成到 SDR 或 HDR 屏幕。
+- **局部重绘与逐屏缓存。** 缩小背景导入和合成范围，复用各输出的渲染缓冲。普通 SDR 输出还可将辉光计算限制在受影响的区域。 [渲染架构](docs/architecture.md)
+- **可组合的鼠标触发。** 左键、右键和中键可独立选择，点击动画与拖尾分别开关，也可在无需按住按键时始终显示拖尾。
+- **多屏和 HiDPI。** 支持逐屏调整尺寸。拖尾按光标所在屏幕的呈现帧采样，跨屏时新生成的拖尾和小三角使用目标屏幕的倍率。
+- **实时预览和诊断。** 在设置页预览改动，按需查看重绘范围、CPU/GPU 分阶段耗时和结构化诊断报告。
 
 ## 运行要求
 
-- KDE Plasma 6 / KWin 6.6 或更高版本
-- OpenGL 合成器；项目没有 CPU 渲染回退
-- CMake 3.20+
-- ECM 6.22+
-- Qt 6.10+
-- KF6 6.22+
-- 与当前运行版本匹配的 KWin 开发包
+| 项目 | 要求 |
+| --- | --- |
+| 桌面 | KDE Plasma 6 |
+| KWin | 主要支持 6.8，兼容 6.6 和 6.7 |
+| 图形 | KWin 的 OpenGL 合成，驱动需支持着色器和 RGBA16F 帧缓冲 |
 
-KWin 原生特效插件与 `EffectPluginFactory` ABI 绑定，工厂 IID 连补丁版本也包含在内。本项目兼容 KWin 6.6 及更高版本；升级 KWin（包括 6.8.1 → 6.8.2 这类补丁升级）后必须用对应版本开发包重新编译，否则 KWin 会忽略旧二进制。`install-local.sh` 会检测版本变化并自动清理旧构建目录。
+原生插件绑定到构建时的 KWin 版本，工厂 IID 连补丁版本也包含在内。主要目标为 KWin 6.8，并兼容 6.6 和 6.7；升级 KWin（包括 6.8.1 → 6.8.2 这类补丁升级）后必须用对应版本的开发包重新编译，否则 KWin 会忽略旧二进制。`install-local.sh` 会检测版本变化并自动清理旧构建目录。
 
-## 安装
+## 安装与启用
 
-需要 C++ 编译器、CMake、ECM、Qt 6、KF6、KWin 和 OpenGL 开发文件。
+### 安装构建依赖
 
-Arch Linux：
+源码构建需要 C++20 编译器、CMake 3.20+、ECM 6.22+、Qt 6.10+、KF6 6.22+、Gettext、OpenGL 开发文件和匹配版本的 KWin 开发包。可展开对应发行版的命令。
 
-```bash
-sudo pacman -S --needed base-devel cmake extra-cmake-modules kservice kwin libepoxy qt6-base qt6-declarative vulkan-headers
-```
-
-Fedora：
+<details>
+<summary>Arch Linux</summary>
 
 ```bash
-sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel kf6-ki18n-devel kf6-kservice-devel kwin-devel libdrm-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qttools-devel vulkan-headers
+sudo pacman -S --needed base-devel cmake extra-cmake-modules kservice kwin libepoxy qt6-base \
+  qt6-declarative vulkan-headers
 ```
 
-Kubuntu：
+</details>
+
+<details>
+<summary>Fedora</summary>
+
+```bash
+sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel kf6-ki18n-devel \
+  kf6-kservice-devel kwin-devel libdrm-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel \
+  qt6-qttools-devel vulkan-headers
+```
+
+</details>
+
+<details>
+<summary>Kubuntu</summary>
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y --no-install-recommends appstream ca-certificates cmake extra-cmake-modules g++ git kwin-dev libdrm-dev libepoxy-dev libkf6config-dev libkf6coreaddons-dev libkf6i18n-dev libkf6kcmutils-dev libkf6service-dev libkf6windowsystem-dev ninja-build pkg-config qt6-base-dev qt6-declarative-dev qt6-tools-dev libvulkan-dev
+sudo apt-get install -y --no-install-recommends appstream ca-certificates cmake extra-cmake-modules \
+  g++ gettext git kwin-dev libdrm-dev libepoxy-dev libkf6config-dev libkf6coreaddons-dev libkf6i18n-dev \
+  libkf6kcmutils-dev libkf6service-dev libkf6windowsystem-dev ninja-build pkg-config qt6-base-dev \
+  qt6-declarative-dev qt6-tools-dev libvulkan-dev
 ```
 
-如需运行 `scripts/verify-release.sh`，还需要 `appstream` 和 `ripgrep`；CI 另外使用 `ninja-build`。
+</details>
 
-在项目目录运行：
+### 编译并启用
+
+1. 在源码目录以普通用户运行安装脚本。安装到系统目录时，脚本会在安装阶段请求管理员权限。
+
+   ```bash
+   ./install-local.sh --system
+   ```
+
+2. 打开 **系统设置 → 外观与样式 → 桌面特效**，搜索并启用 **BA Click FX**。首次安装或升级 KWin 后若未出现，注销并重新登录 Plasma。
+
+安装脚本也支持 `--user`、`--no-reload` 和 `--help`。可用 `JOBS=4` 指定编译并行数。
+
+## 配置
+
+在 **桌面特效** 中点击 **BA Click FX** 右侧的配置按钮。调整完成后点击 **应用** 保存。
+
+| 设置页 | 可以调整的内容 |
+| --- | --- |
+| **效果** | 点击动画、触发按键、拖尾、始终显示拖尾和沿途小三角 |
+| **外观** | 动画速度、整体尺寸和逐屏缩放 |
+| **触发范围** | 仅在桌面显示、全屏抑制和按应用排除 |
+| **诊断** | 日志级别、重绘区域边框和诊断报告 |
+
+默认开启点击、拖尾和沿途小三角，仅左键触发。全屏抑制默认关闭。每个新按下的已选按键触发一次点击，多个已选按键共用一条拖尾，最后一个松开时才结束。清空按键选择后，“始终显示拖尾”仍可独立使用。右键菜单和中键粘贴照常工作。
+
+开启显示器独立缩放后，每个屏幕使用自己的倍率。尚未配置的屏幕默认为 `1.00`。
+
+开启全屏抑制后，按住拖入全屏窗口会停止发射，已有内容自然淡出。拖出时从当前位置重新起笔。若要排除指定应用，在“触发范围”中启用应用排除，再用“选取窗口…”将应用加入列表。
+
+## 排查问题
+
+从设置页的 **诊断** 复制诊断信息或生成报告。排查渲染问题时，可临时提高日志级别或开启重绘区域边框。性能测试时请关闭边框。
 
 ```bash
-./install-local.sh --system
+journalctl --user --since=-2min -o cat QT_CATEGORY=kwin_effect_ba_click_fx
+qdbus-qt6 org.kde.KWin /Effects debug kwin4_effect_ba_click_fx status
+qdbus-qt6 org.kde.KWin /Effects debug kwin4_effect_ba_click_fx diagnostics
 ```
 
-请以当前用户运行脚本；安装到 `/usr` 时，脚本会自行请求管理员权限。安装后在「系统设置 → 外观与样式 → 桌面特效」中搜索 **BA Click FX** 并启用。首次安装或升级 KWin 后若未出现，注销并重新登录 Plasma。
+重新编译并覆盖已加载的插件后，需要启动新的 KWin 会话才能加载新代码。开发时可使用仓库内的嵌套会话脚本。 [测试与发布](docs/testing.md)
 
-常用选项：
-
-```bash
-JOBS=4 ./install-local.sh --system
-./install-local.sh --no-reload
-./install-local.sh --help
-```
-
-KWin 原生插件与当前 KWin 版本绑定；升级 KWin 后需要重新编译本插件。
-
-右侧配置按钮提供：
-
-- 时间缩放
-- 整体尺寸
-- 显示器独立缩放
-- 点击效果开关
-- 拖尾开关
-- 沿途小三角开关
-- 仅在桌面显示
-- 全屏时禁用拖尾和点击
-- 按应用排除特效
-- 调试日志
-- 重绘区域边框
-
-颜色、粒子数量、拖尾宽度、发射间距和 Bloom 参数保持 Unity 原始值，不作为用户调节项。
-
-如需对某个应用停用特效，开启“排除指定应用”，点击“选取窗口…”后
-选中该应用的任意窗口。KWin 会返回应用标识，确认后才会加入排除列表。
-对于缺少 desktop-file 标识的 Wine/Proton 窗口，Steam 游戏组合有效的 App ID
-与可执行文件名；Lutris 的运行 UUID 每次启动都会变化，因此改用 Wine prefix
-与可执行文件名。两种方式都能分别排除同一游戏的启动器和游戏本体。
-
-卸载：
+## 卸载
 
 ```bash
 ./uninstall-local.sh --system
 ```
 
-用户级安装使用 `./uninstall-local.sh --user`。默认保留配置；追加 `--purge-config` 可同时删除配置和启用状态。
+用户级安装使用 `--user`。默认保留设置，追加 `--purge-config` 可删除设置和启用状态。
 
-## 测试与兼容性
+## 开发文档
 
-自动测试、嵌套 KWin 会话、双屏/HiDPI/HDR 验证和回滚说明见
-[TESTING.md](TESTING.md)。
-
-## 日志与诊断
-
-日常使用优先通过设置页的“日志级别”“复制诊断信息”“生成诊断报告”和“打开诊断目录”操作。
-设置页不可用时，可使用命令行备用入口：
-
-```bash
-kwriteconfig6 --file kwinrc --group Effect-ba-click-fx --key LogLevel 3
-qdbus-qt6 org.kde.KWin /Effects reconfigureEffect kwin4_effect_ba_click_fx
-```
-
-日志级别为 `0=关闭`、`1=错误`、`2=实例`、`3=帧统计`、`4=详细调试`。查看日志：
-
-```bash
-journalctl --user --since=-2min -o cat QT_CATEGORY=kwin_effect_ba_click_fx
-journalctl --user -f -n 0 -o cat QT_CATEGORY=kwin_effect_ba_click_fx
-```
-
-查询运行状态或生成结构化诊断：
-
-```bash
-qdbus-qt6 org.kde.KWin /Effects debug kwin4_effect_ba_click_fx status
-qdbus-qt6 org.kde.KWin /Effects debug kwin4_effect_ba_click_fx diagnostics
-```
-
-报告保存在 `~/.cache/ba-click-fx/diagnostics/`。详细字段说明见 [TESTING.md](TESTING.md)。
-
-显示重绘区域：
-
-```bash
-kwriteconfig6 --file kwinrc --group Effect-ba-click-fx --key DebugDamage true
-qdbus-qt6 org.kde.KWin /Effects reconfigureEffect kwin4_effect_ba_click_fx
-```
-
-青色边框表示插件申请的逻辑重绘区域。性能测试时应关闭 `DebugDamage`。
-
-## 热重载限制
-
-`reconfigureEffect` 只重新读取配置。`unloadEffect` / `loadEffect` 可以重建 Effect 对象，但 Qt 会缓存已映射的 native plugin factory，因此覆盖一个正在使用的 `.so` 不会替换当前进程中的机器码。
-
-- 配置修改可以立即生效
-- 首次发现的新插件通常可以直接加载
-- 已加载插件的 C++ 修改需要新的 KWin 进程
-- 日常开发使用 `test-nested.sh`，正式安装后重新登录会话
-
-## 渲染架构
-
-每帧渲染顺序与 Unity UI Render Pass 对齐：
-
-1. 将本帧变化区域的桌面像素导入线性 RGBA16F Scene。
-2. 按 Unity Render Queue 顺序绘制 Trail、Ring/Ring3、Ring4 与 MeshTri。
-3. 对真实亮源区域执行 PPv2 MXFinalBloom 金字塔。
-4. 将 Scene 与 Bloom 合成并编码回 KWin 输出传递函数。
-
-FBO 与 Bloom 金字塔按输出复用；damage Region 只减少无变化 texel 的导入、传播和合成，不改变 Shader、采样核、几何、粒子参数或最终视觉结果。
+[源码结构](docs/architecture.md) · [测试与发布](docs/testing.md) · [FX_Touch 核对记录](docs/unity-parity.md) · [后续计划](docs/roadmap.md)
 
 ## 许可
 
-项目代码采用 [GNU GPL v3.0 或更高版本](LICENSE)。Blue Archive 相关名称、商标及游戏来源的视觉资源归各自权利人所有，不包含在项目代码的 GPL 授权范围内。本项目是非官方的技术研究与桌面视觉效果实现，与 NEXON、NEXON Games、Yostar 等权利方无隶属或授权关系。
-
-后续计划记录在 [TODO.md](TODO.md)。
-
-参数分析与跨平台实现可参考 [ba-click-fx](https://github.com/CialloKing/ba-click-fx)。
+项目代码采用 GNU GPL v3.0 或更高版本。《蔚蓝档案》的名称、商标和游戏来源素材归各自权利人所有，适用各自的授权条款。本项目为非官方实现。 [许可证](LICENSE)

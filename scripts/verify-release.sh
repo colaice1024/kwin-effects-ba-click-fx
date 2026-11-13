@@ -6,21 +6,44 @@ set -euo pipefail
 src_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${src_dir}"
 build_dir="${1:-build/verify}"
+if [[ $# -gt 0 ]]; then
+  shift
+fi
 
 required_files=(
-  LICENSE README.md README.en.md TODO.md TESTING.md CMakeLists.txt
+  LICENSE README.md README.en.md CMakeLists.txt
+  docs/README.md docs/architecture.md docs/testing.md docs/roadmap.md
+  docs/store-description.zh-CN.md docs/store-description.en.md
   po/zh_CN/kwin_ba_click_fx_config.po
   po/zh_TW/kwin_ba_click_fx_config.po
-  src/metadata.json src/baclickfxeffect.cpp src/baclickfxeffect.h
-  src/applicationfilter.cpp src/applicationfilter.h
-  src/gpurenderer.cpp src/gpurenderer.h src/clickinstance.cpp src/clickinstance.h
-  src/trailstream.cpp src/trailstream.h src/curveutils.cpp src/curveutils.h
-  src/diagnostics.cpp src/diagnostics.h src/damageutils.cpp src/damageutils.h
-  src/bloomutils.cpp src/bloomutils.h
-  src/pathresampler.cpp src/pathresampler.h src/subsystems.cpp src/subsystems.h
-  src/meshprofiles.cpp src/meshprofiles.h
+  src/metadata.json src/effect/baclickfxeffect.cpp src/effect/baclickfxeffect.h
+  src/effect/kwincompat.cpp src/effect/kwincompat.h
+  src/input/frameclock.h src/unity/trailpoints.h src/unity/emission.h src/unity/lineribbon.h src/unity/billboard.h
+  tests/native/billboard_oracle.cpp
+  tests/native/distance_oracle.cpp tests/native/trail_mesh_oracle.cpp
+  tests/fixtures/unity-trail-mesh-native.json
+  tests/native/birth_oracle.cpp tests/fixtures/unity-birth-native.json
+  tests/native/native_oracle.h tests/native/trail_points_oracle.cpp
+  tests/fixtures/unity-trail-points-native.json
+  src/input/mousebuttonutils.h
+  src/input/applicationfilter.cpp src/input/applicationfilter.h
+  src/render/gpurenderer.cpp src/render/gpurenderer.h src/particles/clickinstance.cpp src/particles/clickinstance.h
+  src/render/gputexture.cpp src/render/gputexture.h
+  src/particles/trailstream.cpp src/particles/trailstream.h src/particles/curveutils.cpp src/particles/curveutils.h
+  src/effect/diagnostics.cpp src/effect/diagnostics.h src/render/damageutils.cpp src/render/damageutils.h
+  src/render/bloomutils.cpp src/render/bloomutils.h
+  src/particles/subsystems.cpp src/particles/subsystems.h
+  src/render/meshprofiles.cpp src/render/meshprofiles.h
+  src/particles/curvedata.h src/particles/touchparams.h
+  src/unity/random.h src/unity/initial.h src/unity/shape.h src/unity/circle.h
+  src/unity/gradient.h src/unity/curve.h src/unity/uv.h src/unity/rotation.h
+  src/unity/motion.h src/unity/retirement.h src/unity/timing.h
+  scripts/import-unity-touch.py scripts/verify-unity-native.py docs/unity-parity.md
+  tests/fixtures/unity-touch.json tests/fixtures/unity-gradient-native.json
+  tests/fixtures/unity-rotation-native.json tests/native/rotation_oracle.cpp
+  tests/fixtures/unity-motion-native.json
   config/CMakeLists.txt config/baclickfxconfig.cpp config/baclickfxconfig.h
-  config/baclickfxconfig.ui tests/CMakeLists.txt tests/logic_tests.cpp
+  config/baclickfxconfig.ui tests/CMakeLists.txt tests/logic_tests.cpp tests/gpu_tests.cpp tests/config_tests.cpp
   assets/Cylinder002.obj
   assets/FX_TEX_Triangle_02_1.png assets/FX_TEX_Trail_03.png
   assets/FX_TEX_Grad_Ring3.png assets/FX_TEX_Circle_01.png
@@ -55,11 +78,11 @@ if [[ -z "${cmake_version}" || "${cmake_version}" != "${metadata_version}" ]]; t
 fi
 
 if ! rg -q 'diagnostics\.cpp' src/CMakeLists.txt; then
-  echo "src/diagnostics.cpp 未加入构建目标" >&2
+  echo "src/effect/diagnostics.cpp 未加入构建目标" >&2
   failed=1
 fi
 if ! rg -q 'damageutils\.cpp' src/CMakeLists.txt; then
-  echo "src/damageutils.cpp 未加入构建目标" >&2
+  echo "src/render/damageutils.cpp 未加入构建目标" >&2
   failed=1
 fi
 if ! rg -q 'add_subdirectory\(tests\)' CMakeLists.txt; then
@@ -99,7 +122,8 @@ cmake_generator_args=()
 if command -v ninja >/dev/null 2>&1; then
   cmake_generator_args=(-G Ninja)
 fi
-cmake -S . -B "${build_dir}" "${cmake_generator_args[@]}" -DBUILD_TESTING=ON
+cmake -S . -B "${build_dir}" "${cmake_generator_args[@]}" \
+  -DBUILD_TESTING=ON -DBA_CLICK_FX_BUILD_GPU_TESTS=OFF "$@"
 
 echo "==> 构建"
 cmake --build "${build_dir}" -j"${JOBS:-2}"

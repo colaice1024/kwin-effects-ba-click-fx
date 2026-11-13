@@ -1,0 +1,131 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// 拖动 Ribbon 与按距离触发的 Ring4 发射数据。
+//
+// 轨迹点由 KWin 呈现时钟推进年龄，并在超过 TrailRenderer 寿命后移除。绘制使用
+// GPURenderer 的输出级 HDR 目标；轨迹包围盒只参与 damage 计算。
+
+#pragma once
+
+#include "clickinstance.h"
+#include "unity/trailpoints.h"
+#include "unity/lineribbon.h"
+#include "subsystems.h"
+
+#include <QPointF>
+#include <QRectF>
+#include <cstdint>
+#include <deque>
+#include <optional>
+#include <vector>
+
+namespace KWin
+{
+
+/// 拖尾轨迹采样点；`penUp` 将相邻采样点分隔为不同笔划。
+struct TrailPoint
+{
+    QPointF pos;       // 全局逻辑坐标。
+    float birthTime = 0.0f; // 原生 TrailRenderer 使用 float32 出生时刻。
+    bool penUp = false;
+    double worldUnitPx = 0; // 采样时所在输出的投影，0 表示沿用默认投影。
+};
+
+/// 管理拖尾轨迹点的追加、断笔与老化。
+class TrailStream
+{
+public:
+    /// 开始新笔划，并插入断笔标记。
+    void beginStroke(const QPointF &p, double worldUnitPx = 0);
+
+    /// 追加从 `from` 到 `to` 的轨迹段。
+    void addSegment(const QPointF &from, const QPointF &to, double worldUnitPx = 0);
+    void setHead(const QPointF &point, double worldUnitPx = 0)
+    {
+        m_head = point;
+        m_headWorldUnitPx = worldUnitPx;
+    }
+    std::optional<QPointF> head() const { return m_head; }
+    double headWorldUnitPx() const { return m_headWorldUnitPx; }
+    float time() const { return float(m_time); }
+    float lifetime() const { return m_lifetime; }
+
+    /// 新点使用当前帧时刻，添加后再按寿命回收旧点。
+    void advanceTime(double dt) { m_time += dt; }
+    bool retireExpired(double lifeSec);
+
+    /// 返回全部轨迹点向外扩展 `padPx` 后的包围盒。
+    QRectF boundingBox(double padPx) const;
+
+    bool empty() const { return m_points.empty(); }
+    void clear() { m_points.clear(); m_head.reset(); m_headWorldUnitPx = 0; m_time = 0; }
+    const std::deque<TrailPoint> &points() const { return m_points; }
+
+private:
+    /// 插入轨迹点，并从头部移除超过容量上限的点。
+    void pushPoint(const QPointF &p, bool penUp, double worldUnitPx);
+
+    std::deque<TrailPoint> m_points;
+    std::optional<QPointF> m_head;
+    double m_headWorldUnitPx = 0;
+    double m_time = 0;
+    float m_lifetime = .30000001192092896f;
+};
+
+/// 单条笔划中的全局逻辑坐标渲染采样点。
+struct StrokeSample
+{
+    QPointF pos;
+    double headT = 0.0;    // 0 表示头部，1 表示尾部。
+    double width = 0.0;    // 最终逻辑像素宽度。
+    double textureU = 0.0; // TrailRenderer 纹理模式计算出的 U 坐标。
+    baclickfx::Rgb color{}; // 线性 RGB，输出阶段只追加 HDR 倍率。
+    double alpha = 1.0;
+};
+
+struct StrokeData
+{
+    std::vector<StrokeSample> samples;
+    std::vector<double> segmentLengths;
+    double totalLength = 0.0;
+    QPointF ribbonOrigin;
+    double worldUnitPx = 0;
+    std::vector<baclickfx::unity::LinePoint> ribbonInput;
+    baclickfx::unity::LineRibbonScratch ribbonScratch;
+    std::vector<baclickfx::unity::LineRibbonVertex> ribbon;
+    // 按原生头尾顺序准备点；跨帧复用容量，避免每帧分配临时数组。
+    std::vector<baclickfx::unity::TrailPointRecord> sourcePoints;
+    std::vector<std::array<float, 3>> preparedPoints;
+    std::vector<float> emissionFlags;
+};
+
+/**
+ * 按断笔标记将轨迹转换为可渲染笔划。
+ *
+ * @param stream 轨迹点集。
+ * @param trail TrailRenderer 子系统参数。
+ * @return 至少包含两个采样点的笔划集合。
+ *
+ * 轨迹点可保存采样时的输出投影。未指定时使用 `trail.worldUnitPx`。
+ */
+std::vector<StrokeData> buildTrailStrokes(const TrailStream &stream,
+                                          const baclickfx::Subsystem &trail);
+
+void buildTrailStrokes(const TrailStream &stream, const baclickfx::Subsystem &trail,
+                       std::vector<StrokeData> &out);
+
+/// 采样 TrailRenderer 渐变颜色，并返回线性 RGB；`tNorm=0` 为头部。
+baclickfx::Rgb evalTrailGradientColor(const baclickfx::Subsystem &trail, double tNorm);
+
+/// 采样 TrailRenderer 渐变透明度；`tNorm=0` 为头部。
+double evalTrailGradientAlpha(const baclickfx::Subsystem &trail, double tNorm);
+
+/// 距离发射器产生的一次 Ring4 粒子簇。
+struct TriBurstInstance
+{
+    QPointF center;
+    // Ring4 的 maxNumParticles 作用于单次按下，因此用流水号关联所属拖动会话。
+    std::uint64_t dragSerial = 0;
+    TriBurstEmission burst;
+};
+
+} // namespace KWin

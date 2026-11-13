@@ -1,0 +1,321 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// BA Click FX 的 KWin 特效实现。
+
+#pragma once
+#include <QSizeF>
+
+#include "input/applicationfilter.h"
+#include "baclickfxdefaults.h"
+#include "particles/clickinstance.h"
+#include "particles/curveutils.h"
+#include "render/gpurenderer.h"
+#include "kwincompat.h"
+#include "input/frameclock.h"
+#include "render/meshprofiles.h"
+#include "particles/subsystems.h"
+#include "particles/trailstream.h"
+
+#include <core/region.h>
+
+#include <QLoggingCategory>
+#include <QHash>
+#include <QPointF>
+#include <QPointer>
+#include <QJsonObject>
+#include <QUuid>
+
+#include <chrono>
+#include <cstdint>
+#include <vector>
+
+Q_DECLARE_LOGGING_CATEGORY(KWIN_BA_CLICK_FX)
+
+namespace KWin
+{
+
+class Window;
+
+/** KWin effect that renders the ported FX_Touch particle and trail systems. */
+class BaClickFxEffect : public BaClickFxEffectBase
+{
+    Q_OBJECT
+
+public:
+    BaClickFxEffect();
+    ~BaClickFxEffect() override;
+
+    void reconfigure(ReconfigureFlags flags) override;
+    bool isActive() const override;
+    int requestedEffectChainPosition() const override;
+    QString debug(const QString &parameter) const override;
+
+    void postPaintScreen() override;
+
+    static bool supported();
+
+private Q_SLOTS:
+    /// 处理全局鼠标按键状态跃迁；指针移动由 `pointerMotion()` 采样。
+    void slotMouseChanged(const QPointF &pos, const QPointF &oldPos,
+                          Qt::MouseButtons buttons, Qt::MouseButtons oldButtons,
+                          Qt::KeyboardModifiers modifiers, Qt::KeyboardModifiers oldModifiers);
+
+private:
+    /// 用统一的呈现时间戳推进模拟和申请重绘。
+    void prepareScreen(ScreenPrePaintData &data, std::chrono::nanoseconds presentTime) override;
+
+    /// 底层场景成功后，将粒子和拖尾合成到当前输出。
+    void paintOverlay(const RenderTarget &renderTarget, const RenderViewport &viewport,
+                      const Region &deviceRegion, LogicalOutput *screen) override;
+    void releaseRenderDevice(const RenderDevice *device) override;
+
+    /// 原生移动事件立即更新过滤状态；轨迹在呈现帧中采样。
+    void handlePointerMotion(const QPointF &position) override;
+
+    /// 读取 `[Effect-ba-click-fx]` 配置并重建运行时参数。
+    void loadConfig();
+    void applyPreview(const QJsonObject &preview);
+    void setTriggerButtons(int buttons);
+
+    /// 定位并加载 Cylinder002 OBJ 网格。
+    void loadMeshes();
+
+    /// 推进实例状态并移除寿命结束的对象。
+    void advance(double dt);
+    void retireTrails();
+    bool needsAnimationFrame() const;
+
+    /**
+     * 渲染当前输出上的全部活动内容。
+     *
+     * @return 成功提交可见内容时返回 `true`；无内容或渲染目标初始化失败时返回
+     * `false`。
+     */
+    bool renderGpu(GPURenderer &gpu, const RenderTarget &renderTarget,
+                   const RenderViewport &viewport, const LogicalOutput *screen,
+                   const QRectF &outputRect);
+    void watchOutput(LogicalOutput *screen);
+    void invalidateOutputTargets(LogicalOutput *screen);
+
+    /// 绘制 damage 诊断叠层；青色为插件申请区域。
+    void drawDebugDamage(const RenderTarget &renderTarget, const RenderViewport &viewport);
+
+    /// 缓存 Bloom 前后的几何区域和渲染数据，使用全局逻辑坐标。
+    void updateContentRegions();
+
+    /// 按各输出的色彩模式和 Bloom 传播半径计算重绘区。
+    Region dirtyRegion() const;
+
+    /// 返回当前输出的 Bloom 逻辑像素外扩半径。
+    double bloomPadding() const;
+
+    /// 在全局逻辑坐标 `pos` 创建点击实例。
+    void spawn(const QPointF &pos);
+
+    /// 开始新的拖动会话并初始化距离累计状态。
+    void startDrag(const QPointF &pos, bool awaitFirstSample = false);
+
+    /// 根据累计路径距离追加拖尾采样并触发 Ring4 发射。
+    void updateDrag(const QPointF &pos, double elapsed, LogicalOutput *output);
+
+    /// 结束拖动会话；已有拖尾点继续按寿命老化。
+    void endDrag();
+
+    /// 返回当前时间缩放是否满足 TrailRenderer 的启用阈值。
+    bool trailEnabled() const;
+
+    /**
+     * 返回 `pos` 所在输出的逻辑高度。
+     *
+     * 坐标未命中输出时依次回退到首个输出和 1080 像素参考高度。
+     */
+    QSizeF outputSizeForPos(const QPointF &pos) const;
+
+    // 当前参数表对应的输出；仅在创建新实例或拖尾会话时刷新。
+    void refreshSubsystems(const QPointF &pos);
+    double outputScaleForPos(const QPointF &pos) const;
+
+    /// 返回指定拖动会话中仍存活的 Ring4 粒子数。
+
+    /// 按 KWin 输入语义返回 `pos` 处最上层可接收输入的窗口。
+    Window *inputWindowAt(const QPointF &pos) const;
+
+    enum class InputPhase { Trigger, HeldMotion };
+
+    /// 按住手势沿用起点的桌面/应用许可；全屏抑制对所有输入阶段实时生效。
+    bool isEffectAllowedAt(const QPointF &pos, InputPhase phase = InputPhase::Trigger) const;
+
+    /// 检查窗口及其 transient 主窗口是否命中应用排除规则。
+    bool isWindowExcluded(const Window *window) const;
+
+    baclickfx::defaults::LogLevel m_logLevel = baclickfx::defaults::kLogLevelDefault;
+    bool m_debugDamage = false;
+    bool m_dragging = false;
+    bool m_autoTrailSession = false;
+    std::chrono::steady_clock::time_point m_lastAutoTrailMotion;
+    double m_timeScale = 1.0;
+    double m_globalScale = 1.0;
+    QJsonObject m_outputScaleOverrides;
+    bool m_outputScaleEnabled = baclickfx::defaults::kOutputScaleEnabledDefault;
+    // Ring4 粒子上限作用于单次按下；0 保留为未关联会话。
+    std::uint64_t m_dragSerial = 0;
+
+    // 功能开关；Unity 已定义的视觉常量不提供配置项。
+    bool m_enableTrail = true;
+    bool m_alwaysTrail = false;
+    bool m_enableDistanceEmitter = true;
+    bool m_enableClick = baclickfx::defaults::kEnableClickDefault;
+    Qt::MouseButtons m_triggerButtons = Qt::MouseButtons::fromInt(baclickfx::defaults::kTriggerButtonsDefault);
+    bool m_disableOnFullscreen = baclickfx::defaults::kDisableOnFullscreenDefault;
+    bool m_desktopOnly = baclickfx::defaults::kDesktopOnlyDefault;
+    bool m_excludeApplications = baclickfx::defaults::kExcludeApplicationsDefault;
+    QVector<baclickfx::ExcludedApplication> m_excludedApplications;
+    // /proc 身份按 KWin 窗口 UUID 缓存，避免 Always Trail 的移动事件重复读文件。
+    mutable QHash<QUuid, baclickfx::ProcessIdentity> m_processIdentityCache;
+    // 首个已选按键按下时固化许可，直到全部已选按键松开。
+    bool m_pressSuppressed = false;
+
+    // 当前参数表仅供之后创建的实例使用；活动实例持有自己的参数快照。
+    baclickfx::SubsystemMap m_subsystems;
+    baclickfx::MeshProfiles m_meshes;
+    baclickfx::Rng m_rng;
+
+    struct PendingClick {
+        QPointF position;
+        std::uint64_t firstSampleSerial = 0;
+    };
+    std::vector<PendingClick> m_pendingClicks;
+    std::vector<ClickInstance> m_instances;
+    std::vector<TriBurstInstance> m_bursts;
+    struct TrailSession {
+        TrailStream stream;
+        QPointer<LogicalOutput> output;
+        double timeScale = 1.0;
+        baclickfx::Subsystem trailParams;
+        baclickfx::Subsystem ring4Params;
+        ParticleEmitterState emitter;
+        std::vector<StrokeData> strokes;
+        bool active = false;
+        bool firstSamplePending = false;
+    };
+    std::vector<TrailSession> m_trails;
+
+    // 渲染器状态；OpenGL 资源在 paintScreen() 中延迟初始化。
+    GpuRendererCache m_gpu;
+
+    // 拖动采样状态
+    // 上一次采样到的指针位置。
+    QPointF m_lastDrag;
+
+    // 帧时钟；0 表示第一帧仅建立时间基准。
+    baclickfx::OutputFrameClock m_frameClock;
+    bool m_dragIdle = false;
+
+    // 用于输入诊断：是否收到原生移动通知；几何始终逐呈现帧采样。
+    bool m_motionEventsWork = false;
+
+    // 以下区域均使用全局逻辑坐标。缓存结果可确保预绘制、背景导入、Bloom 和最终
+    // 合成使用同一个模拟快照。
+    Region m_lastDirty;
+    // 未做 Bloom 外扩的内容区域。
+    Region m_lastContent;
+    Region m_lastBloomSource;
+    Region m_lastPostBloom;
+    // 输入回调可在下一个模拟帧之前创建拖尾会话。
+    bool m_contentRegionsDirty = true;
+
+    // updateContentRegions() 为当前模拟快照计算的保守包围盒；逐输出渲染只做相交判断，
+    // 避免多输出重复求值曲线、三角函数和 MeshTri 顶点。
+    std::vector<QRectF> m_clickBaseBounds;
+    std::vector<QRectF> m_clickMeshBounds;
+    std::vector<QRectF> m_clickTriBounds;
+    std::vector<QRectF> m_burstBounds;
+    std::vector<QRectF> m_trailBounds;
+
+    // 上一帧合成区域用于在内容消失后额外重绘一次，清除残留像素。
+    bool m_paintedLastFrame = false;
+    Region m_lastPainted;
+
+    // 背景导入区域为当前 dirty 与上一帧绘制区域的并集，用于覆盖私有 HDR 目标中的
+    // 旧粒子。最终 composite 仍只使用当前 dirty 区域。
+    Region m_lastClearArea;
+
+    bool logsInstances() const;
+    bool logsFrames() const;
+    bool logsVerbose() const;
+
+    // 性能统计状态，仅在帧统计级别及以上更新。记录 CPU 分段、异步 GPU 计时、呈现
+    // 间隔，以及插件申请区域与 KWin 实际重绘区域的差异。
+    void logFrameStats(GpuRendererCache::Entry &entry, const RenderViewport &viewport,
+                       const Region &deviceRegion, const LogicalOutput *screen, double cpuMs);
+    void resetFrameStats();
+
+    struct OutputFrameStats
+    {
+        QString mode;
+        int frames = 0;
+        int gpuSamples = 0;
+        double cpuMsSum = 0.0;
+        double cpuMaxMs = 0.0;
+        double gpuImportMsSum = 0.0;
+        double gpuBloomMsSum = 0.0;
+        double gpuCompositeMsSum = 0.0;
+        double devicePxSum = 0.0;
+        double requestPxSum = 0.0;
+        double sourcePxSum = 0.0;
+        int deviceRects = 0;
+        int requestRects = 0;
+        int sourceRects = 0;
+    };
+
+    // 上一次呈现间隔，单位为毫秒。
+    double m_lastFrameDelta = 0.0;
+
+    // 最近一帧各 CPU 阶段的墙钟时间，单位为毫秒。
+    double m_lastPrePaintCpuMs = 0.0;
+    double m_lastSetupCpuMs = 0.0;
+    double m_lastTrailCpuMs = 0.0;
+    double m_lastParticleCpuMs = 0.0;
+    double m_lastFinishCpuMs = 0.0;
+    double m_inputCpuMsSinceLog = 0.0;
+    QHash<QString, OutputFrameStats> m_outputFrameStats;
+    std::uint64_t m_inputEvents = 0;
+    std::uint64_t m_inputAccepted = 0;
+    std::uint64_t m_inputMerged = 0;
+    std::uint64_t m_inputDiscarded = 0;
+    std::uint64_t m_inputCrossScreen = 0;
+    std::uint64_t m_mouseChangedEvents = 0;
+    std::uint64_t m_mouseChangedMotion = 0;
+    std::uint64_t m_pointerMotionEvents = 0;
+    std::uint64_t m_fallbackSamples = 0;
+    std::uint64_t m_skipNoActivity = 0;
+    std::uint64_t m_skipNoDamage = 0;
+    std::uint64_t m_skipGpu = 0;
+    std::uint64_t m_skipTarget = 0;
+    std::uint64_t m_skipImport = 0;
+
+    int m_statFrames = 0;
+    double m_statCpuMsSum = 0.0;
+    double m_statCpuMsMax = 0.0;
+    double m_statPrePaintCpuMsSum = 0.0;
+    double m_statSetupCpuMsSum = 0.0;
+    double m_statTrailCpuMsSum = 0.0;
+    double m_statParticleCpuMsSum = 0.0;
+    double m_statFinishCpuMsSum = 0.0;
+    double m_statGpuMsSum = 0.0;
+    double m_statGpuMsMax = 0.0;
+    double m_statGpuImportMsSum = 0.0;
+    double m_statGpuParticleMsSum = 0.0;
+    double m_statGpuBloomMsSum = 0.0;
+    double m_statGpuCompositeMsSum = 0.0;
+    int m_statGpuSamples = 0;
+    double m_statFrameMsSum = 0.0;
+    double m_statFrameMsMax = 0.0;
+    double m_statDevicePxSum = 0.0;   // KWin 实际重画的设备像素数
+    double m_statRequestPxSum = 0.0;  // 我们申请的（m_lastDirty 折算设备像素）
+    double m_statBloomSourcePxSum = 0.0; // Bloom 原始输入（m_lastBloomSource）设备像素数
+    double m_statDeviceRectsSum = 0.0;
+    double m_statRequestRectsSum = 0.0;
+    double m_statBloomSourceRectsSum = 0.0;
+};
+
+} // namespace KWin

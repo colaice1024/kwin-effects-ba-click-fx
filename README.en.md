@@ -1,123 +1,125 @@
-# kwin-effects-ba-click-fx
+# BA Click FX
 
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
+[中文](README.md) · [Documentation index](docs/README.md)
 
-Chinese documentation: [README.md](README.md)
+A KDE Plasma / KWin port of Blue Archive’s `FX_Touch`. Click to show a central disc, dissolving rings, and triangle particles. Hold a trigger button and move to draw a ribbon trail with particles along its path.
 
-**A KDE Plasma KWin click effect and cursor trail plugin ported parameter by parameter from the Blue Archive Unity UI/FX_Touch effect.**
+[Features](#features) · [Runtime requirements](#runtime-requirements) · [Install and enable](#install-and-enable) · [Configure](#configure)
 
-`kwin-effects-ba-click-fx` recreates the ParticleSystem, TrailRenderer and post-processing parameters from `FX_Touch` in native KWin rendering. Clicks play the center disc, dissolving rings and Ring3 particles; holding the left button while moving creates the Ribbon trail and Ring4 distance-emitter particles. Rendering uses native C++ / OpenGL, a linear RGBA16F scene and Unity PPv2 MXFinalBloom without a scripting runtime.
-
-![BA Click FX preview](preview/logo.gif)
+![BA Click FX click and trail preview](preview/logo.gif)
 
 ## Features
 
-- Parameter-by-parameter Unity port rather than a look-alike redesign.
-- Recreates Ring, MeshTri, Ring3, Ring4 and TrailRenderer colors, sizes, rotation, lifetime, UV animation and HDR intensity.
-- Uses the original Cylinder002 mesh and per-angle UVs; particle textures are sampled directly by shaders.
-- Linear RGBA16F scene, HDR particle blending and Unity PPv2 MXFinalBloom.
-- Sparse damage regions so only changed pixels are imported, processed and composited.
-- Multi-monitor, HiDPI and different output scale support.
-- KWin pointer events preserve high-polling-rate mouse movement for accurate trails.
-- KCM configuration page, repaint-region markers and segmented CPU/GPU performance logs.
-- Live preview in the settings page; changes are saved only on Apply.
+- **Original particles and ribbon.** Uses the original particle textures and `Cylinder002` mesh with its UVs. The port follows the authored colors, brightness, sizes, rotation, lifetime, and UV animation of Ring, MeshTri, Ring3, Ring4, and TrailRenderer. [FX_Touch parity notes](docs/unity-parity.md)
+- **Native GPU rendering.** C++ and OpenGL blend particles in a linear RGBA16F scene, reproduce Unity PPv2’s `MXFinalBloom`, and composite for SDR or HDR using KWin’s output color description.
+- **Partial repaints and per-output buffers.** The renderer limits background import and compositing to affected regions and reuses buffers per display. On standard SDR outputs, Bloom processing can also be restricted to the affected region. [Rendering architecture](docs/architecture.md)
+- **Configurable mouse triggers.** Select any combination of left, right, and middle buttons. Toggle click bursts and trails independently, or let the trail follow the pointer without holding a button.
+- **Multi-monitor and HiDPI support.** Set a scale for each display. The effect samples the trail at presentation time on the display under the pointer. After crossing to another display, new trail segments and triangle particles use that display’s scale.
+- **Live preview and diagnostics.** Preview changes in the settings page and inspect repaint outlines, per-stage CPU/GPU timings, or structured diagnostic reports.
 
-## Requirements
+## Runtime requirements
 
-- KDE Plasma 6 / KWin 6.6 or newer.
-- OpenGL compositing; there is no CPU rendering fallback.
-- CMake 3.20+, ECM 6.22+, Qt 6.10+ and KF6 6.22+.
-- KWin development files matching the running KWin version.
+| Component | Requirement |
+| --- | --- |
+| Desktop | KDE Plasma 6 |
+| KWin | 6.8 is the primary target, with compatibility for 6.6 and 6.7 |
+| Graphics | KWin OpenGL compositing with shader and RGBA16F framebuffer support |
 
-KWin native effect plugins are ABI-bound to `EffectPluginFactory`, and the factory IID includes the patch version. Rebuild with matching development packages after any KWin upgrade, including patch releases such as 6.8.1 → 6.8.2. `install-local.sh` detects the version change and removes the stale build directory automatically.
+The native plugin is tied to the KWin version it was built against, and the factory IID includes the patch version. KWin 6.8 is the primary target, with compatibility for 6.6 and 6.7; rebuild with matching development packages after any KWin upgrade, including patch releases such as 6.8.1 → 6.8.2. `install-local.sh` detects the version change and removes the stale build directory automatically.
 
-## Install
+## Install and enable
 
-Arch Linux:
+### Install build dependencies
 
-```bash
-sudo pacman -S --needed base-devel cmake extra-cmake-modules kservice kwin libepoxy qt6-base qt6-declarative vulkan-headers
-```
+Building from source requires a C++20 compiler, CMake 3.20+, ECM 6.22+, Qt 6.10+, KF6 6.22+, Gettext, OpenGL development files, and matching KWin development packages. Expand the command for your distribution.
 
-Fedora:
+<details>
+<summary>Arch Linux</summary>
 
 ```bash
-sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel kf6-ki18n-devel kf6-kservice-devel kwin-devel libdrm-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qttools-devel vulkan-headers
+sudo pacman -S --needed base-devel cmake extra-cmake-modules kservice kwin libepoxy qt6-base \
+  qt6-declarative vulkan-headers
 ```
 
-Kubuntu:
+</details>
+
+<details>
+<summary>Fedora</summary>
+
+```bash
+sudo dnf install -y cmake extra-cmake-modules gcc-c++ gettext kf6-kcmutils-devel kf6-ki18n-devel \
+  kf6-kservice-devel kwin-devel libdrm-devel libepoxy-devel qt6-qtbase-devel qt6-qtdeclarative-devel \
+  qt6-qttools-devel vulkan-headers
+```
+
+</details>
+
+<details>
+<summary>Kubuntu</summary>
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y --no-install-recommends appstream ca-certificates cmake extra-cmake-modules g++ git kwin-dev libdrm-dev libepoxy-dev libkf6config-dev libkf6coreaddons-dev libkf6i18n-dev libkf6kcmutils-dev libkf6service-dev libkf6windowsystem-dev ninja-build pkg-config qt6-base-dev qt6-declarative-dev qt6-tools-dev libvulkan-dev
+sudo apt-get install -y --no-install-recommends appstream ca-certificates cmake extra-cmake-modules \
+  g++ gettext git kwin-dev libdrm-dev libepoxy-dev libkf6config-dev libkf6coreaddons-dev libkf6i18n-dev \
+  libkf6kcmutils-dev libkf6service-dev libkf6windowsystem-dev ninja-build pkg-config qt6-base-dev \
+  qt6-declarative-dev qt6-tools-dev libvulkan-dev
 ```
 
-CI and `scripts/verify-release.sh` additionally use `appstream`, `ripgrep` and `ninja-build`.
+</details>
 
-Run from the project directory:
+### Build and enable the effect
+
+1. Run the installer from the source directory as your regular user. It requests administrator access during the system installation step.
+
+   ```bash
+   ./install-local.sh --system
+   ```
+
+2. Open **System Settings → Appearance & Style → Desktop Effects**, then find and enable **BA Click FX**. If it is missing after a first install or KWin upgrade, log out of Plasma and back in.
+
+The installer also accepts `--user`, `--no-reload`, and `--help`. Set `JOBS=4` to choose the number of parallel build jobs.
+
+## Configure
+
+Click the settings button next to **BA Click FX** in **Desktop Effects**. Select **Apply** to save your changes.
+
+| Tab | Controls |
+| --- | --- |
+| **Effects** | Click animations, trigger buttons, trails, always-on trails, and particles along the trail |
+| **Appearance** | Animation speed, overall size, and per-display scaling |
+| **Where to show** | Desktop-only mode, fullscreen suppression, and app exclusions |
+| **Diagnostics** | Log level, repaint-region outlines, and reports |
+
+Click animations, trails, and distance particles are enabled by default, with the left button as the only trigger. Fullscreen suppression is off by default. Each newly pressed selected button plays one click burst. Selected buttons share a trail until the last one is released. **Always show trail** works with all trigger buttons cleared. Context menus and middle-click paste continue to work.
+
+With per-display scaling enabled, each display uses its own scale. Displays without a saved value default to `1.00`.
+
+With fullscreen suppression enabled, dragging into a fullscreen window stops emission and lets existing particles and trails fade. Leaving the window starts a new stroke at the current pointer position. To exclude an app, enable app exclusions under **Where to show** and use **Pick window…** to add it.
+
+## Troubleshoot
+
+Use the **Diagnostics** tab to copy status information or generate a report. To investigate rendering issues, temporarily raise the log level or enable repaint-region outlines. Turn outlines off when measuring performance.
 
 ```bash
-./install-local.sh --system
-```
-
-Run the script as your normal user; it requests administrator access only for `/usr`. Then open **System Settings -> Appearance & Style -> Desktop Effects**, search for **BA Click FX**, and enable it. Log out and back in after a first install or KWin upgrade if it is not listed.
-
-Useful options:
-
-```bash
-JOBS=4 ./install-local.sh --system
-./install-local.sh --no-reload
-./install-local.sh --help
-```
-
-The configuration page provides time scaling, overall scaling, per-display scaling, a click-effect toggle, a desktop-only switch, fullscreen suppression, application exclusions, trail controls, debug logging and repaint-region borders. To exclude an application, enable **Exclude specified applications**, click **Pick window…**, then select one of its windows; KWin supplies the application identity and the page asks for confirmation before adding it. Steam games without a desktop-file identity combine a valid App ID with the executable name. Lutris run UUIDs change between launches, so Lutris and other Wine games instead combine the Wine prefix with the executable name. Both forms allow a launcher and its game window to be excluded independently. Unity-authored colors, particle counts, trail width, emission spacing and Bloom parameters remain fixed.
-
-Remove a system installation with `./uninstall-local.sh --system`; use `--user` for a user installation. Add `--purge-config` to remove saved settings and the enabled state.
-
-### Per-display scaling
-
-Enable **Enable per-display scaling** to tune each output independently. Settings are stored in `~/.config/kwinrc` under `[Effect-ba-click-fx]`; `OutputScaleOverrides` is a JSON object keyed by output UUID:
-
-```ini
-OutputScaleEnabled=true
-OutputScaleOverrides={"<output-uuid>":1.25}
-```
-
-Find UUIDs with `qdbus-qt6 org.kde.KWin /Effects debug kwin4_effect_ba_click_fx outputs-json`. Reset saves an explicit `1.00`; legacy name-only entries are intentionally not migrated.
-
-## Testing and compatibility
-
-Automated tests, nested KWin sessions, dual-monitor/HiDPI/HDR checks and rollback notes are documented in [TESTING.md](TESTING.md).
-
-## Logging and diagnostics
-
-Use the configuration page to set log level, copy diagnostics, generate a report or open the diagnostics directory. If the page is unavailable:
-
-```bash
-kwriteconfig6 --file kwinrc --group Effect-ba-click-fx --key LogLevel 3
-qdbus-qt6 org.kde.KWin /Effects reconfigureEffect kwin4_effect_ba_click_fx
 journalctl --user --since=-2min -o cat QT_CATEGORY=kwin_effect_ba_click_fx
-```
-
-Log levels are `0=off`, `1=errors`, `2=instances`, `3=frame statistics` and `4=verbose debugging`. Query status or structured diagnostics with:
-
-```bash
 qdbus-qt6 org.kde.KWin /Effects debug kwin4_effect_ba_click_fx status
 qdbus-qt6 org.kde.KWin /Effects debug kwin4_effect_ba_click_fx diagnostics
 ```
 
-Reports are stored in `~/.cache/ba-click-fx/diagnostics/`. `DebugDamage` draws requested repaint regions and should be disabled for performance measurements.
+After rebuilding a plugin that KWin has already loaded, start a new KWin session to load the new code. For development, use the repository’s nested session script. [Testing and releases](docs/testing.md)
 
-## Hot-reload limitations
+## Uninstall
 
-`reconfigureEffect` reloads configuration only. `unloadEffect` / `loadEffect` can recreate the effect object, but Qt caches the mapped native plugin factory, so replacing an already loaded `.so` does not replace code in the current KWin process. Configuration changes apply immediately; C++ changes require a new KWin process. Use `test-nested.sh` for development and log out after a system installation.
+```bash
+./uninstall-local.sh --system
+```
 
-## Rendering architecture
+Use `--user` for a user installation. Settings are kept by default. Add `--purge-config` to remove them and clear the enabled state.
 
-Each frame imports changed desktop pixels into a linear RGBA16F scene, draws Trail, Ring/Ring3, Ring4 and MeshTri in Unity render-queue order, runs the PPv2 MXFinalBloom pyramid over the actual bright source region, then composites the scene and applies the KWin output transfer function. FBOs and Bloom pyramids are reused per output; damage regions reduce unchanged texel work without changing shaders, sampling kernels, geometry or particle parameters.
+## Development docs
+
+[Source layout](docs/architecture.md) · [Testing and releases](docs/testing.md) · [FX_Touch parity notes](docs/unity-parity.md) · [Roadmap](docs/roadmap.md)
 
 ## License
 
-The project code is licensed under [GNU GPL v3.0 or later](LICENSE). Blue Archive names, trademarks and game-derived visual assets belong to their respective rights holders and are not covered by the project code license. This is an unofficial technical research and desktop visual effect implementation.
-
-Further plans are tracked in [TODO.md](TODO.md). Parameter analysis and cross-platform implementation references are available at [ba-click-fx](https://github.com/CialloKing/ba-click-fx).
+The project code is licensed under GNU GPL v3.0 or later. Blue Archive names, trademarks, and game-derived assets belong to their respective rights holders and are subject to their own terms. This is an unofficial implementation. [License](LICENSE)
